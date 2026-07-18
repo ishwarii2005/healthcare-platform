@@ -33,6 +33,8 @@ def hold_slot(db: Session, patient_id: str, doctor_id: str, slot_start: datetime
     doctor = db.get(DoctorProfile, doctor_id)
     if not doctor:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Doctor not found")
+    if not doctor.user.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This doctor is not currently accepting bookings")
 
     slot_end = slot_start + timedelta(minutes=doctor.slot_duration_minutes)
 

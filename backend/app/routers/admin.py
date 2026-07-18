@@ -16,7 +16,7 @@ def _to_doctor_out(doc: DoctorProfile) -> DoctorOut:
     return DoctorOut(
         id=doc.id, user_id=doc.user_id, full_name=doc.user.full_name, email=doc.user.email,
         specialization=doc.specialization, bio=doc.bio, slot_duration_minutes=doc.slot_duration_minutes,
-        working_hours=json.loads(doc.working_hours_json or "{}"),
+        working_hours=json.loads(doc.working_hours_json or "{}"), is_active=doc.user.is_active,
     )
 
 
@@ -61,6 +61,34 @@ def update_doctor(doctor_id: str, payload: DoctorUpdateRequest, db: Session = De
         doc.slot_duration_minutes = payload.slot_duration_minutes
     if payload.working_hours is not None:
         doc.working_hours_json = json.dumps(payload.working_hours)
+    db.commit()
+    db.refresh(doc)
+    return _to_doctor_out(doc)
+
+
+@router.post("/doctors/{doctor_id}/deactivate", response_model=DoctorOut)
+def deactivate_doctor(doctor_id: str, db: Session = Depends(get_db)):
+    """
+    Soft delete: disables the doctor's login and hides them from patient search,
+    without touching existing appointments/visit history/prescriptions - a hard
+    delete would either orphan or cascade-destroy that data. This does NOT cancel
+    any appointments the doctor already has; use leave-management first for that.
+    """
+    doc = db.get(DoctorProfile, doctor_id)
+    if not doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Doctor not found")
+    doc.user.is_active = False
+    db.commit()
+    db.refresh(doc)
+    return _to_doctor_out(doc)
+
+
+@router.post("/doctors/{doctor_id}/activate", response_model=DoctorOut)
+def activate_doctor(doctor_id: str, db: Session = Depends(get_db)):
+    doc = db.get(DoctorProfile, doctor_id)
+    if not doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Doctor not found")
+    doc.user.is_active = True
     db.commit()
     db.refresh(doc)
     return _to_doctor_out(doc)

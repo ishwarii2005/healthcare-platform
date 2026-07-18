@@ -73,6 +73,7 @@ class DoctorOut(BaseModel):
     bio: Optional[str] = None
     slot_duration_minutes: int
     working_hours: dict
+    is_active: bool = True
 
 
 class LeaveCreateRequest(BaseModel):

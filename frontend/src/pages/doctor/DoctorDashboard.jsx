@@ -59,7 +59,16 @@ function Queue() {
 
 function AllAppointments() {
   const [rows, setRows] = useState([])
-  useEffect(() => { api.get('/api/appointments/mine').then((r) => setRows(r.data)) }, [])
+  const [active, setActive] = useState(null)
+
+  useEffect(() => { load() }, [])
+  async function load() {
+    const r = await api.get('/api/appointments/mine')
+    setRows(r.data)
+  }
+
+  if (active) return <VisitNoteForm appt={active} onDone={() => { setActive(null); load() }} onBack={() => setActive(null)} />
+
   return (
     <div>
       <h2>All appointments</h2>
@@ -67,7 +76,7 @@ function AllAppointments() {
         {rows.length === 0 && <div className="empty-state">No appointments yet.</div>}
         {rows.length > 0 && (
           <table>
-            <thead><tr><th>Patient</th><th>When</th><th>Status</th><th>Urgency</th></tr></thead>
+            <thead><tr><th>Patient</th><th>When</th><th>Status</th><th>Urgency</th><th /></tr></thead>
             <tbody>
               {rows.map((a) => (
                 <tr key={a.id}>
@@ -75,6 +84,12 @@ function AllAppointments() {
                   <td>{new Date(a.slot_start).toLocaleString()}</td>
                   <td><span className="pill">{a.status}</span></td>
                   <td>{a.urgency ? <UrgencyBadge level={a.urgency} /> : '—'}</td>
+                  <td>
+                    {a.status === 'confirmed' && (
+                      <button className="btn btn-primary btn-sm" onClick={() => setActive(a)}>Open visit</button>
+                    )}
+                    {a.status === 'completed' && <VisitNoteToggle id={a.id} />}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -82,6 +97,29 @@ function AllAppointments() {
         )}
       </div>
     </div>
+  )
+}
+
+function VisitNoteToggle({ id }) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState(null)
+  async function toggle() {
+    if (!open && !note) {
+      const r = await api.get(`/api/appointments/${id}/visit-note`)
+      setNote(r.data)
+    }
+    setOpen(!open)
+  }
+  return (
+    <>
+      <button className="btn btn-secondary btn-sm" onClick={toggle}>{open ? 'Hide' : 'View note'}</button>
+      {open && note && (
+        <div style={{ marginTop: 8, maxWidth: 380, fontSize: 13 }}>
+          <div><strong>Diagnosis:</strong> {note.diagnosis || '—'}</div>
+          <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{note.clinical_notes}</div>
+        </div>
+      )}
+    </>
   )
 }
 

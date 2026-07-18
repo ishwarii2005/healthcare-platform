@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import DoctorProfile
+from app.models import DoctorProfile, User
 from app.schemas import DoctorOut
 from app.services.slot_service import get_available_slots
 
@@ -16,13 +16,15 @@ def _to_doctor_out(doc: DoctorProfile) -> DoctorOut:
     return DoctorOut(
         id=doc.id, user_id=doc.user_id, full_name=doc.user.full_name, email=doc.user.email,
         specialization=doc.specialization, bio=doc.bio, slot_duration_minutes=doc.slot_duration_minutes,
-        working_hours=json.loads(doc.working_hours_json or "{}"),
+        working_hours=json.loads(doc.working_hours_json or "{}"), is_active=doc.user.is_active,
     )
 
 
 @router.get("", response_model=list[DoctorOut])
 def search_doctors(specialization: str | None = Query(default=None), db: Session = Depends(get_db)):
-    q = db.query(DoctorProfile)
+    # Deactivated doctors are hidden from patient-facing search/booking, but stay
+    # visible to admin (GET /api/admin/doctors is unfiltered) so history/records aren't lost.
+    q = db.query(DoctorProfile).join(User, DoctorProfile.user_id == User.id).filter(User.is_active == True)  # noqa: E712
     if specialization:
         q = q.filter(DoctorProfile.specialization.ilike(f"%{specialization}%"))
     return [_to_doctor_out(d) for d in q.all()]
@@ -30,14 +32,20 @@ def search_doctors(specialization: str | None = Query(default=None), db: Session
 
 @router.get("/specializations")
 def list_specializations(db: Session = Depends(get_db)):
-    rows = db.query(DoctorProfile.specialization).distinct().all()
+    rows = (
+        db.query(DoctorProfile.specialization)
+        .join(User, DoctorProfile.user_id == User.id)
+        .filter(User.is_active == True)  # noqa: E712
+        .distinct()
+        .all()
+    )
     return sorted({r[0] for r in rows})
 
 
 @router.get("/{doctor_id}/availability")
 def availability(doctor_id: str, day: str = Query(..., description="YYYY-MM-DD"), db: Session = Depends(get_db)):
     doctor = db.get(DoctorProfile, doctor_id)
-    if not doctor:
+    if not doctor or not doctor.user.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Doctor not found")
     try:
         day_dt = datetime.strptime(day, "%Y-%m-%d")

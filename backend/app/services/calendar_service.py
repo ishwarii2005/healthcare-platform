@@ -29,6 +29,25 @@ logger = logging.getLogger("calendar_service")
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
+def is_configured() -> bool:
+    """
+    True only if GOOGLE_CLIENT_ID/SECRET look like real values, not the
+    placeholders shipped in .env.example. Google's OAuth screen returns a vague
+    "Error 401: invalid_client / OAuth client was not found" if you send it a
+    client_id that isn't a real, registered OAuth client - this catches that
+    case before we ever redirect the admin to Google.
+    """
+    client_id = settings.GOOGLE_CLIENT_ID.strip()
+    client_secret = settings.GOOGLE_CLIENT_SECRET.strip()
+    if not client_id or not client_secret:
+        return False
+    if "xxxxxxxxxx" in client_id or client_secret.startswith("GOCSPX-xxxx"):
+        return False
+    if not client_id.endswith(".apps.googleusercontent.com"):
+        return False
+    return True
+
+
 def build_oauth_flow() -> Flow:
     client_config = {
         "web": {

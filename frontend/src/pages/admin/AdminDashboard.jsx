@@ -41,6 +41,8 @@ function Doctors() {
     bio: '', slot_duration_minutes: 15, working_hours: emptyWorkingHours(),
     active_days: DAYS.map(([k]) => k),
   })
+  const [editingId, setEditingId] = useState(null)
+  const [editForm, setEditForm] = useState(null)
 
   useEffect(() => { load() }, [])
   async function load() {
@@ -78,9 +80,68 @@ function Doctors() {
     }
   }
 
+  function startEdit(d) {
+    setError(''); setSuccess(''); setShowForm(false)
+    const activeDays = Object.keys(d.working_hours)
+    setEditForm({
+      specialization: d.specialization,
+      bio: d.bio || '',
+      slot_duration_minutes: d.slot_duration_minutes,
+      working_hours: { ...emptyWorkingHours(), ...d.working_hours },
+      active_days: activeDays.length ? activeDays : DAYS.map(([k]) => k),
+    })
+    setEditingId(d.id)
+  }
+
+  function toggleEditDay(k) {
+    setEditForm((f) => ({
+      ...f,
+      active_days: f.active_days.includes(k) ? f.active_days.filter((d) => d !== k) : [...f.active_days, k],
+    }))
+  }
+  function setEditHours(k, idx, val) {
+    setEditForm((f) => ({ ...f, working_hours: { ...f.working_hours, [k]: idx === 0 ? [val, f.working_hours[k][1]] : [f.working_hours[k][0], val] } }))
+  }
+
+  async function submitEdit(e) {
+    e.preventDefault()
+    setError(''); setSuccess('')
+    try {
+      const working_hours = {}
+      editForm.active_days.forEach((k) => { working_hours[k] = editForm.working_hours[k] })
+      await api.patch(`/api/admin/doctors/${editingId}`, {
+        specialization: editForm.specialization,
+        bio: editForm.bio,
+        slot_duration_minutes: Number(editForm.slot_duration_minutes),
+        working_hours,
+      })
+      setSuccess('Doctor profile updated.')
+      setEditingId(null)
+      setEditForm(null)
+      load()
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    }
+  }
+
+  async function toggleActive(d) {
+    setError(''); setSuccess('')
+    if (d.is_active && !confirm(
+      `Deactivate Dr. ${d.full_name}? They won't be able to log in or receive new bookings, ` +
+      `but existing appointments and visit history are kept. You can reactivate them anytime.`
+    )) return
+    try {
+      await api.post(`/api/admin/doctors/${d.id}/${d.is_active ? 'deactivate' : 'activate'}`)
+      setSuccess(d.is_active ? `Dr. ${d.full_name} deactivated.` : `Dr. ${d.full_name} reactivated.`)
+      load()
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    }
+  }
+
   return (
     <div>
-      <div className="card-header"><h2>Doctors</h2><button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancel' : '+ Add doctor'}</button></div>
+      <div className="card-header"><h2>Doctors</h2><button className="btn btn-primary btn-sm" onClick={() => { setShowForm(!showForm); setEditingId(null) }}>{showForm ? 'Cancel' : '+ Add doctor'}</button></div>
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
@@ -115,13 +176,51 @@ function Doctors() {
         </form>
       )}
 
+      {editingId && editForm && (
+        <form className="card" onSubmit={submitEdit}>
+          <h3>Edit doctor profile</h3>
+          <p className="muted">Email and password can't be changed here - only the clinic-facing profile.</p>
+          <div className="field-row">
+            <div className="field"><label>Specialization</label><input required value={editForm.specialization} onChange={(e) => setEditForm({ ...editForm, specialization: e.target.value })} /></div>
+            <div className="field" style={{ maxWidth: 160 }}><label>Slot length (min)</label><input type="number" value={editForm.slot_duration_minutes} onChange={(e) => setEditForm({ ...editForm, slot_duration_minutes: e.target.value })} /></div>
+          </div>
+          <div className="field"><label>Bio</label><textarea value={editForm.bio} onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })} /></div>
+
+          <label style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-soft)' }}>Working days & hours</label>
+          {DAYS.map(([k, label]) => (
+            <div className="field-row" key={k} style={{ alignItems: 'center', marginTop: 6 }}>
+              <label style={{ width: 90 }}>
+                <input type="checkbox" checked={editForm.active_days.includes(k)} onChange={() => toggleEditDay(k)} /> {label}
+              </label>
+              <div className="field"><input type="time" disabled={!editForm.active_days.includes(k)} value={editForm.working_hours[k][0]} onChange={(e) => setEditHours(k, 0, e.target.value)} /></div>
+              <div className="field"><input type="time" disabled={!editForm.active_days.includes(k)} value={editForm.working_hours[k][1]} onChange={(e) => setEditHours(k, 1, e.target.value)} /></div>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <button className="btn btn-primary">Save changes</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { setEditingId(null); setEditForm(null) }}>Cancel</button>
+          </div>
+        </form>
+      )}
+
       <div className="card">
         {doctors.length === 0 && <div className="empty-state">No doctors added yet.</div>}
         {doctors.map((d) => (
           <div className="doctor-row" key={d.id}>
             <div>
-              <strong>Dr. {d.full_name}</strong>
+              <strong>Dr. {d.full_name}</strong>{' '}
+              <span className="pill" style={d.is_active
+                ? { background: 'var(--urgency-low-bg)', color: 'var(--urgency-low)' }
+                : { background: 'var(--urgency-high-bg)', color: 'var(--urgency-high)' }}>
+                {d.is_active ? 'Active' : 'Deactivated'}
+              </span>
               <div className="muted">{d.specialization} · {d.email} · {d.slot_duration_minutes}-min slots</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => startEdit(d)}>Edit</button>
+              <button className={`btn btn-sm ${d.is_active ? 'btn-danger' : 'btn-secondary'}`} onClick={() => toggleActive(d)}>
+                {d.is_active ? 'Deactivate' : 'Reactivate'}
+              </button>
             </div>
           </div>
         ))}
@@ -228,11 +327,17 @@ function Emails() {
 
 function CalendarConnect() {
   const [status, setStatus] = useState(null)
+  const [error, setError] = useState('')
   useEffect(() => { api.get('/api/calendar/status').then((r) => setStatus(r.data)) }, [])
 
   async function connect() {
-    const r = await api.get('/api/calendar/oauth/start')
-    window.location.href = r.data.authorization_url
+    setError('')
+    try {
+      const r = await api.get('/api/calendar/oauth/start')
+      window.location.href = r.data.authorization_url
+    } catch (err) {
+      setError(apiErrorMessage(err))
+    }
   }
 
   return (
@@ -240,12 +345,22 @@ function CalendarConnect() {
       <h2>Google Calendar</h2>
       <p className="muted">Connect the clinic's Google account once. Every booking then creates one calendar event with the doctor and patient added as attendees, so both get an invite in their own calendar - no per-user OAuth needed.</p>
       <div className="card">
+        {status && !status.configured && (
+          <div className="alert alert-error">
+            Google Calendar credentials aren't set up on the backend yet - GOOGLE_CLIENT_ID/SECRET
+            in <code>.env</code> are still placeholders. Follow <code>docs/GOOGLE_CALENDAR_SETUP.md</code> to
+            create real OAuth credentials, add them to the backend's <code>.env</code>, and restart the backend.
+          </div>
+        )}
+        {error && <div className="alert alert-error">{error}</div>}
         {status?.connected ? (
           <div className="alert alert-success">Clinic calendar is connected.</div>
         ) : (
           <>
             <div className="alert alert-info">Not connected yet - appointments will still book normally, just without calendar invites.</div>
-            <button className="btn btn-primary" onClick={connect}>Connect Google Calendar</button>
+            <button className="btn btn-primary" onClick={connect} disabled={status && !status.configured}>
+              Connect Google Calendar
+            </button>
           </>
         )}
       </div>
