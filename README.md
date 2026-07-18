@@ -11,10 +11,31 @@ around two things generic booking forms don't do:
   diagnoses, prescriptions) are fed back into the *next* pre-visit AI summary, so
   the system can flag "3rd visit for headaches in 6 weeks" instead of treating each
   visit as a blank slate.
+- **Conversational pre-booking intake** — before picking a doctor, patients can chat
+  with an AI assistant about why they're visiting. It asks up to 3 focused follow-up
+  questions, then recommends a specialization (validated against the clinic's actual
+  roster) and hands the consolidated summary forward to prefill the booking flow.
 
 Everything else (leave-triggered rebooking suggestions, email outbox with retries,
 Google Calendar sync) is built to support those two flows without ever blocking a
 booking if a third-party service (LLM, SMTP, Calendar) is slow or down.
+
+## Live deployment
+
+| | |
+|---|---|
+| **App** | https://healthcare-platform-xi.vercel.app |
+| **Backend API** | https://healthcare-platform-ra42.onrender.com |
+| **API docs** | https://healthcare-platform-ra42.onrender.com/docs |
+
+Frontend is on Vercel, backend + Postgres (Neon) on Render. Two things to know
+before judging responsiveness:
+- The backend is on Render's **free tier**, which spins down after 15 minutes of
+  inactivity. The first request after idle time takes ~30-60 seconds to wake up -
+  this is expected free-tier behavior, not a bug.
+- To log in as admin, use the account created via the one-time bootstrap endpoint
+  (see "First-run bootstrap" below) - there's no default admin/password shipped
+  with the code for security reasons.
 
 ## Stack
 
@@ -117,10 +138,12 @@ FastAPI at **`/docs`** once the backend is running. Summary:
 | `POST /api/auth/register` | Public | Patient self-registration |
 | `POST /api/auth/login` | Public | Returns JWT (form-encoded `username`/`password`) |
 | `POST /api/admin/doctors` | Admin | Create doctor profile + user account |
-| `PATCH /api/admin/doctors/{id}` | Admin | Update specialization/hours/slot length |
+| `PATCH /api/admin/doctors/{id}` | Admin | Update specialization/hours/slot length/bio |
+| `POST /api/admin/doctors/{id}/deactivate` / `/activate` | Admin | Soft delete - hides from patient search & blocks new bookings, keeps history |
 | `POST /api/admin/doctors/{id}/leave` | Admin | Mark leave day → auto-cancels + notifies + suggests rebooking |
 | `GET /api/admin/emails/failed` / `POST .../retry` | Admin | Notification reliability dashboard |
-| `GET /api/doctors` | Any | Search by `?specialization=` |
+| `POST /api/intake/chat` | Patient | Multi-turn symptom chat → specialization recommendation |
+| `GET /api/doctors` | Any | Search by `?specialization=` (active doctors only) |
 | `GET /api/doctors/{id}/availability?day=YYYY-MM-DD` | Any | Open slots for a day |
 | `POST /api/appointments/hold` | Patient | Step 1 of booking - reserves a slot |
 | `POST /api/appointments/{id}/symptoms` | Patient | Step 2 - submits symptoms, runs AI triage, confirms booking |
@@ -172,9 +195,12 @@ nothing is silently degraded.
 1. Push this repo to GitHub, create a new **Web Service** on Render pointed at
    `backend/` with `render.yaml` as the blueprint (or set it up manually: Docker
    environment, `Dockerfile` in `backend/`).
-2. Add the env vars from `backend/.env.example` in Render's dashboard — a free
-   Postgres add-on (or an external free one like Neon/Supabase) for `DATABASE_URL`,
-   your Groq key, SMTP credentials, and Google OAuth credentials.
+2. Add the env vars from `backend/.env.example` in Render's dashboard. For
+   `DATABASE_URL`, use **[Neon](https://neon.tech)** (free, permanent, no expiry)
+   rather than Render's own free Postgres — Render's free databases are hard-deleted
+   30 days after creation with no grace warning, which is fine for a demo but a bad
+   surprise for anything you want to keep working. Also add your Groq key, SMTP
+   credentials, and Google OAuth credentials.
 3. Once deployed, run the bootstrap-admin curl command against your Render URL.
 
 **Frontend → Vercel**
